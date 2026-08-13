@@ -12,14 +12,22 @@ import Cli
 open Lean Meta Core SafeVerify
 open Std
 
+private instance : MonadEnv (ReaderT Environment Id) where
+  getEnv := read
+  modifyEnv _ := pure ()
+
+/-- Get all axioms transitively used by a declaration in the given environment. -/
+def getAxioms (env : Environment) (name : Name) : Array Name :=
+  (collectAxioms name : ReaderT Environment Id (Array Name)).run env
+
 /-- Takes the environment obtained after replaying all the constant in a file and outputs
 a hashmap storing the infos corresponding to all the theorems and definitions in the file. -/
 def processFileDeclarations (env : Environment) : HashMap Name Info := Id.run do
   let mut out : HashMap Name Info := {}
   for (_, ci) in env.constants.map₂  do
     if ci.kind ∈ ["theorem", "def", "opaque", "inductive", "constructor"] then
-      let (_, s) := (CollectAxioms.collect ci.name).run env |>.run {}
-      out := out.insert ci.name ⟨ci, s.axioms⟩
+      let axioms := getAxioms env ci.name
+      out := out.insert ci.name ⟨ci, axioms⟩
   return out
 
 /-- Check if an Info uses only allowed axioms -/
@@ -413,8 +421,8 @@ def runMain (p : Parsed) : IO UInt32 := do
     if submissionDecls.get? name |>.isNone then
       if let some ci := submissionEnv.find? name then
         if ci.kind ∈ ["theorem", "def", "opaque", "inductive", "constructor"] then
-          let (_, s) := (CollectAxioms.collect name).run submissionEnv |>.run {}
-          supplementedDecls := supplementedDecls.insert name ⟨ci, s.axioms⟩
+          let axioms := getAxioms submissionEnv name
+          supplementedDecls := supplementedDecls.insert name ⟨ci, axioms⟩
           IO.eprintln s!"  Note: '{name}' found in submission's imported environment"
 
   -- Validate Nat literals in new declarations
